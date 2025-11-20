@@ -1,194 +1,219 @@
-import { useState, useEffect, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
 import CreateSimulation from '../components/CreateSimulation';
-import { getAllSimulations, createSimulation, SimulationListItem } from '../lib/simulationService';
-import SimulationListItemComponent from '../components/SimulationListItem';
-import tossBallConfig from '../simulations/tossBall.json';
-import twoBoxesConfig from '../simulations/twoBoxes.json';
+import JsonSimulation from '../components/JsonSimulation';
+import {
+  getAllSimulations,
+  getSimulation,
+  initializeStorage,
+  getCurrentSimulationId,
+  setCurrentSimulationId,
+  deleteSimulation,
+  SimulationListItem,
+} from '../lib/simulationService';
 
 function Home() {
-  const navigate = useNavigate();
   const [showModal, setShowModal] = useState(false);
   const [simulations, setSimulations] = useState<SimulationListItem[]>([]);
+  const [currentSimId, setCurrentSimId] = useState<number | null>(null);
+  const [currentConfig, setCurrentConfig] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
+  // Initialize and load simulations
   useEffect(() => {
-    loadSimulations();
+    initializeApp();
   }, []);
 
-  const loadSimulations = async () => {
+  const initializeApp = async () => {
     try {
-      setLoading(true);
-      const data = await getAllSimulations();
-      setSimulations(data);
+      // Initialize localStorage with sample simulations if needed
+      initializeStorage();
+
+      // Load all simulations
+      const sims = await getAllSimulations();
+      setSimulations(sims);
+
+      // Try to restore last viewed simulation, or load first one
+      let simId = getCurrentSimulationId();
+      if (!simId && sims.length > 0) {
+        simId = sims[0].id;
+      }
+
+      if (simId) {
+        await loadSimulation(simId);
+      }
     } catch (error) {
-      console.error('Failed to load simulations:', error);
+      console.error('Failed to initialize app:', error);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleJSONExtracted = async (json: any) => {
+  const loadSimulation = async (id: number) => {
     try {
-      const simulationId = await createSimulation(json, true, null);
-      setShowModal(false);
-      navigate(`/simulation/${simulationId}`);
+      const config = await getSimulation(id);
+      setCurrentSimId(id);
+      setCurrentConfig(config);
+      setCurrentSimulationId(id);
     } catch (error) {
-      console.error('Failed to save simulation:', error);
-      alert('Failed to save simulation. Please try again.');
+      console.error('Failed to load simulation:', error);
+      setCurrentSimId(null);
+      setCurrentConfig(null);
     }
   };
 
-  // Static simulation items for TossBall and TwoBoxes
-  const staticSimulations: SimulationListItem[] = useMemo(() => [
-    {
-      id: 'toss-ball' as any,
-      title: tossBallConfig.title || 'Toss Ball',
-      description: tossBallConfig.description || null,
-      created_at: new Date('2024-01-01').toISOString(),
-      parent_id: null,
-      changes_made: null,
-    },
-    {
-      id: 'two-boxes' as any,
-      title: twoBoxesConfig.title || 'Two Boxes Collision',
-      description: twoBoxesConfig.description || null,
-      created_at: new Date('2024-01-01').toISOString(),
-      parent_id: null,
-      changes_made: null,
-    },
-  ], []);
+  const handleSimulationCreated = async (id: number) => {
+    // Reload simulation list
+    const sims = await getAllSimulations();
+    setSimulations(sims);
 
-  // Group simulations by day and sort within each day by time descending
-  const groupedSimulations = useMemo(() => {
-    const groups: Record<string, SimulationListItem[]> = {};
-    
-    simulations.forEach((sim) => {
-      const date = new Date(sim.created_at);
-      const dayKey = date.toLocaleDateString('en-US', { 
-        weekday: 'long', 
-        year: 'numeric', 
-        month: 'long', 
-        day: 'numeric' 
-      });
-      
-      if (!groups[dayKey]) {
-        groups[dayKey] = [];
+    // Load the new simulation
+    await loadSimulation(id);
+  };
+
+  const handleSimulationChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const id = parseInt(e.target.value);
+    if (!isNaN(id)) {
+      loadSimulation(id);
+    }
+  };
+
+  const handleSimulationUpdated = async (newSimId: number) => {
+    // Reload simulation list to show the new version
+    const sims = await getAllSimulations();
+    setSimulations(sims);
+
+    // Load the new simulation
+    await loadSimulation(newSimId);
+  };
+
+  const handleDeleteSimulation = async (id: number) => {
+    if (confirm('Are you sure you want to delete this simulation?')) {
+      try {
+        await deleteSimulation(id);
+
+        // Reload simulation list
+        const sims = await getAllSimulations();
+        setSimulations(sims);
+
+        // If we deleted the current simulation, clear it
+        if (id === currentSimId) {
+          setCurrentSimId(null);
+          setCurrentConfig(null);
+
+          // Load first available simulation if any
+          if (sims.length > 0) {
+            await loadSimulation(sims[0].id);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to delete simulation:', error);
+        alert('Failed to delete simulation');
       }
-      groups[dayKey].push(sim);
-    });
+    }
+  };
 
-    // Sort simulations within each day by time descending (newest first)
-    Object.keys(groups).forEach((dayKey) => {
-      groups[dayKey].sort((a, b) => {
-        const timeA = new Date(a.created_at).getTime();
-        const timeB = new Date(b.created_at).getTime();
-        return timeB - timeA;
-      });
-    });
-
-    return groups;
-  }, [simulations]);
+  if (loading) {
+    return (
+      <div className="max-w-7xl mx-auto px-8 py-8">
+        <div className="text-center text-gray-500 py-8">Loading...</div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-7xl mx-auto px-8 py-8">
-      <div className="text-center mb-12 mt-4">
-        <h1 className="text-4xl text-gray-800 mb-4 font-semibold">
-          Generative Interactive Simulations for Teaching
+      <div className="mb-6">
+        <h1 className="text-3xl text-gray-800 mb-4 font-semibold">
+          GIST Physics Simulator
         </h1>
-        <p className="text-xl text-gray-600">
-          Create and share interactive simulations for teaching physics.
+        <p className="text-gray-600 mb-6">
+          Paste JSON configurations from any LLM to create interactive physics simulations
         </p>
-      </div>
 
-      {/* Sample Simulations Section */}
-      {/* <div className="mb-12">
-        <h2 className="text-2xl font-semibold text-gray-800 mb-6">Sample Simulations</h2>
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-8">
-          <Link 
-            to="/simulation/two-boxes" 
-            className="bg-white rounded-xl p-8 shadow-md no-underline text-inherit transition-all duration-200 flex flex-col hover:-translate-y-1 hover:shadow-xl"
-          >
-            <div className="text-5xl mb-4">📦</div>
-            <h2 className="text-2xl text-gray-800 mb-2">Two Boxes Collision</h2>
-            <p className="text-gray-600 leading-relaxed flex-grow">
-              Watch two boxes move toward each other and collide. 
-              Control their velocities with interactive sliders.
-            </p>
-            <div className="flex gap-2 mt-4">
-              <span className="bg-gray-100 px-3 py-1 rounded-xl text-sm text-gray-600">
-                Collision
-              </span>
-              <span className="bg-gray-100 px-3 py-1 rounded-xl text-sm text-gray-600">
-                Velocity
-              </span>
-            </div>
-          </Link>
-          <Link 
-            to="/simulation/toss-ball" 
-            className="bg-white rounded-xl p-8 shadow-md no-underline text-inherit transition-all duration-200 flex flex-col hover:-translate-y-1 hover:shadow-xl"
-          >
-            <div className="text-5xl mb-4">⚾</div>
-            <h2 className="text-2xl text-gray-800 mb-2">Toss Ball</h2>
-            <p className="text-gray-600 leading-relaxed flex-grow">
-              Toss a ball vertically and observe acceleration versus velocity.
-            </p>
-          </Link>
-        </div>
-      </div> */}
-
-      {/* Static Sample Simulations */}
-      <div className="mb-8">
-        <h2 className="text-2xl font-semibold text-gray-800 mb-6">Sample Simulations</h2>
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 divide-y divide-gray-200">
-          {staticSimulations.map((sim) => (
-            <SimulationListItemComponent key={sim.id} simulation={sim} />
-          ))}
-        </div>
-      </div>
-
-      {/* Create New Simulation */}
-      <div className="mb-8 text-center">
-        <button
-          onClick={() => setShowModal(true)}
-          className="bg-primary text-white px-6 py-3 rounded-lg hover:opacity-90 transition-opacity font-medium text-lg"
-        >
-          Create New Simulation
-        </button>
-      </div>
-
-      {/* Database Simulations */}
-      <div>
-        <h2 className="text-2xl font-semibold text-gray-800 mb-6">Simulation Library</h2>
-        {loading ? (
-          <div className="text-center text-gray-500 py-8">Loading simulations...</div>
-        ) : simulations.length === 0 ? (
-          <div className="text-center text-gray-500 py-8">No simulations yet. Create one to get started!</div>
-        ) : (
-          <div className="space-y-8">
-            {Object.entries(groupedSimulations).map(([dayKey, daySimulations]) => (
-              <div key={dayKey}>
-                <h3 className="text-lg font-semibold text-gray-700 mb-3">{dayKey}</h3>
-                <div className="bg-white rounded-lg shadow-sm border border-gray-200 divide-y divide-gray-200">
-                  {daySimulations.map((sim) => (
-                    <SimulationListItemComponent key={sim.id} simulation={sim} />
-                  ))}
-                </div>
-              </div>
-            ))}
+        {/* Simulation Selector */}
+        <div className="flex gap-4 items-center">
+          <div className="flex-1">
+            <label htmlFor="sim-select" className="block text-sm font-medium text-gray-700 mb-2">
+              Select Simulation:
+            </label>
+            <select
+              id="sim-select"
+              value={currentSimId || ''}
+              onChange={handleSimulationChange}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+              disabled={simulations.length === 0}
+            >
+              {simulations.length === 0 ? (
+                <option value="">No simulations yet</option>
+              ) : (
+                simulations.map((sim) => (
+                  <option key={sim.id} value={sim.id}>
+                    {sim.title || `Simulation ${sim.id}`}
+                    {sim.parent_id ? ' (edited)' : ''}
+                  </option>
+                ))
+              )}
+            </select>
           </div>
-        )}
+
+          <div className="flex gap-2 mt-6">
+            <button
+              onClick={() => setShowModal(true)}
+              className="bg-primary text-white px-6 py-2 rounded-lg hover:opacity-90 transition-opacity font-medium whitespace-nowrap"
+            >
+              + New Simulation
+            </button>
+
+            {currentSimId && (
+              <button
+                onClick={() => handleDeleteSimulation(currentSimId)}
+                className="bg-red-600 text-white px-4 py-2 rounded-lg hover:opacity-90 transition-opacity font-medium"
+                title="Delete simulation"
+              >
+                Delete
+              </button>
+            )}
+          </div>
+        </div>
       </div>
+
+      {/* Simulation Display */}
+      {currentConfig ? (
+        <div className="bg-white rounded-xl shadow-md">
+          <JsonSimulation
+            config={currentConfig}
+            simulationId={currentSimId || undefined}
+            onSimulationUpdated={handleSimulationUpdated}
+          />
+        </div>
+      ) : (
+        <div className="bg-white rounded-xl p-12 shadow-md text-center">
+          <div className="text-gray-400 mb-4">
+            <svg className="mx-auto h-24 w-24" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+          </div>
+          <h2 className="text-2xl text-gray-600 mb-2">No Simulation Selected</h2>
+          <p className="text-gray-500">
+            Create a new simulation to get started
+          </p>
+          <button
+            onClick={() => setShowModal(true)}
+            className="mt-6 bg-primary text-white px-6 py-3 rounded-lg hover:opacity-90 transition-opacity font-medium"
+          >
+            Create Your First Simulation
+          </button>
+        </div>
+      )}
 
       {/* Modal for Creating New Simulation */}
       <CreateSimulation
         isOpen={showModal}
         onClose={() => setShowModal(false)}
-        onJSONExtracted={handleJSONExtracted}
+        onSimulationCreated={handleSimulationCreated}
       />
     </div>
   );
 }
 
 export default Home;
-

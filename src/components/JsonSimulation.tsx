@@ -1,5 +1,4 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
 import Matter from 'matter-js';
 import BaseSimulation from './BaseSimulation';
 import Environment from './simulation_components/Environment';
@@ -10,7 +9,7 @@ import Outputs from './simulation_components/Outputs';
 import SimulationHeader from './simulation_components/SimulationHeader';
 import Graph from './simulation_components/Graph';
 import JsonEditor from './JsonEditor';
-import { createSimulation, updateChangesMade } from '../lib/simulationService';
+import { createSimulation } from '../lib/simulationService';
 
 interface SimulationConfig {
   title?: string;
@@ -66,6 +65,7 @@ interface SimulationConfig {
 interface JsonSimulationProps {
   config: SimulationConfig;
   simulationId?: number;
+  onSimulationUpdated?: (newSimulationId: number) => void;
 }
 
 interface SimulationControls {
@@ -79,8 +79,7 @@ interface DataPoint {
   [key: string]: number;
 }
 
-function JsonSimulation({ config, simulationId }: JsonSimulationProps) {
-  const navigate = useNavigate();
+function JsonSimulation({ config, simulationId, onSimulationUpdated }: JsonSimulationProps) {
   const {
     title,
     description,
@@ -254,10 +253,10 @@ function JsonSimulation({ config, simulationId }: JsonSimulationProps) {
   const handleEdit = async (editedJSON: any) => {
     if (!simulationId) return;
     try {
-      const newSimulationId = await createSimulation(editedJSON, true, simulationId);
-      // Trigger server-side update of changes_made column
-      updateChangesMade(newSimulationId);
-      navigate(`/simulation/${newSimulationId}`);
+      const newSimulationId = await createSimulation(editedJSON, simulationId);
+      if (onSimulationUpdated) {
+        onSimulationUpdated(newSimulationId);
+      }
     } catch (error) {
       console.error('Failed to save edited simulation:', error);
       alert('Failed to save edited simulation. Please try again.');
@@ -271,11 +270,11 @@ function JsonSimulation({ config, simulationId }: JsonSimulationProps) {
   const handleSaveTweakedJSON = async (tweakedJSON: any) => {
     if (!simulationId) return;
     try {
-      const newSimulationId = await createSimulation(tweakedJSON, false, simulationId);
-      // Trigger server-side update of changes_made column
-      updateChangesMade(newSimulationId);
+      const newSimulationId = await createSimulation(tweakedJSON, simulationId);
       setShowJsonEditor(false);
-      navigate(`/simulation/${newSimulationId}`);
+      if (onSimulationUpdated) {
+        onSimulationUpdated(newSimulationId);
+      }
     } catch (error) {
       console.error('Failed to save tweaked simulation:', error);
       alert('Failed to save tweaked simulation. Please try again.');
